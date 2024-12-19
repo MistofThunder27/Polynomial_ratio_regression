@@ -5,12 +5,12 @@ import json
 function_forms = [
     # fit points from a csv file or from a function into various polynomial forms
     "f(x) = A0 + A1*x + A2*x^2 + ... + An*x^n",
-    "f(x) = A_{-n}*x^-n + ... + A_{-2}*x^-2 + A_{-1}/x + A0 + A1*x + A2*x^2 + ... + An*x^n"
+    "f(x) = A_{-n}*x^-n + ... + A_{-2}*x^-2 + A_{-1}/x + A0 + A1*x + A2*x^2 + ... + An*x^n",
     "f(x) = (A0 + A1*x + A2*x^2 + ... + An*x^n)/(B0 + B1*x + B2*x^2 + ... + Bn*x^n)"
 ]
 
 # Settings -------------------------------------------
-FORM_SETTING = 2
+FORM_SETTING = 2 # = 0, 1 or 2
 DEGREE = 1
 NEGATIVE_DEGREE = - DEGREE
 
@@ -51,11 +51,15 @@ elif FORM_SETTING == 1:
 else:
     raise ValueError("Unsupported FORM_SETTING value.")
 
-def run_epoch(A_constants, B_constants=None):
-    A_sum = x_powers @ A_constants
-    if FORM_SETTING == 2:
+# Create run_epoch function based on FORM
+if FORM_SETTING == 2:
+    def run_epoch(constants):
+        A_constants = constants[0, :]  # Row 0: A_constants
+        B_constants = constants[1, :]  # Row 1: B_constants
+        A_sum = x_powers @ A_constants
         B_sum = x_powers @ B_constants
         current_output = A_sum / B_sum
+        #print("sums", A_sum, B_sum, current_output)
 
         error = current_output - dep_list
         total_error = np.sum(error ** 2)
@@ -64,133 +68,107 @@ def run_epoch(A_constants, B_constants=None):
         common_term = 2 * error / B_sum
         An_deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
         Bn_deltas = np.sum((common_term * A_sum / B_sum)[:, None] * x_powers, axis=0)
-        # print("deltas", An_deltas, Bn_deltas)
+        deltas = np.vstack([An_deltas, Bn_deltas])  # Stack deltas into a 2D array
+        #print("deltas", deltas)
 
-        return total_error, An_deltas, Bn_deltas
+        return total_error, deltas
+else:
+    def run_epoch(constants):
+        current_output = x_powers @ constants
+        #print("sums", current_output)
 
-    current_output = A_sum
-    #print("sums", A_sum, current_output)
+        error = current_output - dep_list
+        total_error = np.sum(error ** 2)
+        #print("errors", error, total_error)
 
-    error = current_output - dep_list
-    total_error = np.sum(error ** 2)
-    #print("errors", error, total_error)
+        common_term = 2 * error
+        deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
+        #print("deltas", deltas)
 
-    common_term = 2 * error
-    An_deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
-    # print("deltas", An_deltas)
+        return total_error, deltas
 
-    return total_error, An_deltas, None
-
-
+# START ----------------------------------------------------------------------------------------------------------------
 record = {
     "function form": function_forms[FORM_SETTING],
     "error": float('inf')
 }
 for i in range(NUMBER_OF_LOOPS):
-    # print(f"loop {i+1}:")
-    A_constants = np.random.random(len(powers))
+    #print(f"loop {i+1}:")
     if FORM_SETTING == 2:
-        B_constants = np.random.random(len(powers))
+        constants = np.random.random((2, len(powers)))  # 2 rows: A_constants and B_constants
     else:
-        B_constants = None
-    best_A_constants = A_constants.copy()
-    best_B_constants = B_constants.copy() if B_constants is not None else None
-    # print("constants", A_constants, B_constants)
+        constants = np.random.random(len(powers))  # 1 row: A_constants
+    best_constants = constants.copy()
+    #print("constants", constants)
     learning_rate = STARTING_LEARNING_RATE
 
     # FIRST EPOCH ----------------------------------
-    results = run_epoch(A_constants, B_constants)
-    last_total_error = results[0]
-    A_constants += learning_rate * results[1]
-    if FORM_SETTING == 2:
-        B_constants += learning_rate * results[2]
-    # print("new constants", A_constants, B_constants)
+    last_total_error, deltas = run_epoch(constants)
+    constants += learning_rate * deltas
+    #print("new constants", constants)
 
     # -----------------
-
     for epoch in range(EPOCHS_PER_LOOP):
-        results = run_epoch(A_constants, B_constants)
+        total_error, deltas = run_epoch(constants)
 
         # Update constants if error decreases
-        if results[0] <= last_total_error:
-            last_total_error = results[0]
-            best_A_constants = A_constants.copy()
-            A_constants += learning_rate * results[1]
-            if FORM_SETTING == 2:
-                best_B_constants = B_constants.copy()
-                B_constants += learning_rate * results[2]
-            # print("new constants", A_constants, B_constants)
+        if total_error <= last_total_error:
+            last_total_error = total_error
+            best_constants = constants.copy()
+            if total_error < 1e-12:
+                break
+            constants += learning_rate * deltas
+            #print("new constants", constants)
+
         else:  # Last update was not good
+            constants = best_constants.copy()
             learning_rate *= LEARNING_RATE_DAMPENING_RATE
             if learning_rate < 1e-12:
                 break
+            #print("corrected constants", constants)
 
-            A_constants = best_A_constants.copy()
-            if FORM_SETTING == 2:
-                B_constants = best_B_constants.copy()
-            # print("corrected constants", A_constants, B_constants)
-
-        # print(f"Epoch {epoch}, Total Error: {results[0]}")
+        #print(f"Epoch {epoch}, Total Error: {total_error}")
 
     if last_total_error <= record["error"]:
-        record = {
-            "An": best_A_constants,
-            "Bn": best_B_constants,
-            "error": last_total_error
-        }
+        record.update({
+            "error": last_total_error,
+            "constants": best_constants,
+        })
 
 # Process constants: round to n decimal places and scale ---------------------------------------------------------------
-best_A_constants = record["An"]
-best_B_constants = record["Bn"]
-
-rounded_A_constants = np.round(best_A_constants, ROUND_TO)
-
+constants = record["constants"]
+rounded_constants = np.round(constants, ROUND_TO)
 
 if FORM_SETTING == 2:
-    rounded_B_constants = np.round(best_B_constants, ROUND_TO)
-
-    # Combine both arrays to find the smallest non-zero value
-    all_constants = np.concatenate([rounded_A_constants, rounded_B_constants])
-    smallest_non_zero = np.min(all_constants[np.nonzero(all_constants)])  # Find smallest non-zero value
-    # print(f"{smallest_non_zero=}")
-
+    smallest_non_zero = np.min(rounded_constants[np.nonzero(rounded_constants)])
     # Scale constants so that the smallest non-zero value becomes 1
-    scale_factor = np.absolute(1 / smallest_non_zero) if smallest_non_zero != 0 else 1
-    scaled_A_constants = np.round(rounded_A_constants * scale_factor, ROUND_TO)
-    scaled_B_constants = np.round(rounded_B_constants * scale_factor, ROUND_TO)
+    scale_factor = np.absolute(1 / smallest_non_zero)
+    rounded_constants = np.round(rounded_constants * scale_factor, ROUND_TO)
 
-    record["An"] = record["An"].tolist()
-    record["Bn"] = record["Bn"].tolist()
-    record["An-rounded"] = scaled_A_constants.tolist()
-    record["Bn-rounded"] = scaled_B_constants.tolist()
-else:
-    record["An"] = record["An"].tolist()
-    record["An-rounded"] = rounded_A_constants.tolist()
+record["constants"] = record["constants"].tolist()
+record["constants-rounded"] = rounded_constants.tolist()
 
 # Save constants to JSON
 with open('constants.json', 'w') as f:
    json.dump(record, f, indent=4)
 
 # DRAW -----------------------------------------------------------------------------------------------------------------
-def polynomial_function(x):
-    return np.sum(best_A_constants * x**powers)
+if FORM_SETTING == 2:
+    def display_function(x):
+        return np.sum(constants[0, :] * x**powers) / np.sum(constants[1, :] * x**powers)
 
-def estimated_polynomial_function(x):
-    return np.sum(rounded_A_constants * x**powers)
+    def estimated_display_function(x):
+        return np.sum(rounded_constants[0, :] * x ** powers) / np.sum(rounded_constants[1, :] * x ** powers)
+else:
+    def display_function(x):
+        return np.sum(constants * x ** powers)
 
-def rational_function(x):
-    return np.sum(best_A_constants * x**powers) / np.sum(best_B_constants * x**powers)
-
-def estimated_rational_function(x):
-    return np.sum(scaled_A_constants * x**powers) / np.sum(scaled_B_constants * x**powers)
+    def estimated_display_function(x):
+        return np.sum(rounded_constants * x ** powers)
 
 x_values = np.linspace(min(indep_list), max(indep_list), 500)
-if FORM_SETTING == 2:
-    y_values1 = np.array([rational_function(x) for x in x_values])
-    y_values2 = np.array([estimated_rational_function(x) for x in x_values])
-else:
-    y_values1 = np.array([polynomial_function(x) for x in x_values])
-    y_values2 = np.array([estimated_polynomial_function(x) for x in x_values])
+y_values1 = np.array([display_function(x) for x in x_values])
+y_values2 = np.array([estimated_display_function(x) for x in x_values])
 
 # Plot the function and the original data points
 plt.figure(figsize=(8, 6))
