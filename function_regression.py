@@ -2,13 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 
-# fit points from a csv file or from a function into various polynomial forms
-# Form 1: f(x) = A0 + A1*x + A2*x^2 + ... + An*x^n
-# Form 2: f(x) = A_{-n}*x^-n + ... + A_{-2}*x^-2 + A_{-1}/x + A0 + A1*x + A2*x^2 + ... + An*x^n
-# Form 3: f(x) = (A0 + A1*x + A2*x^2 + ... + An*x^n)/(B0 + B1*x + B2*x^2 + ... + Bn*x^n)
+function_forms = [
+    # fit points from a csv file or from a function into various polynomial forms
+    "f(x) = A0 + A1*x + A2*x^2 + ... + An*x^n",
+    "f(x) = A_{-n}*x^-n + ... + A_{-2}*x^-2 + A_{-1}/x + A0 + A1*x + A2*x^2 + ... + An*x^n"
+    "f(x) = (A0 + A1*x + A2*x^2 + ... + An*x^n)/(B0 + B1*x + B2*x^2 + ... + Bn*x^n)"
+]
 
 # Settings -------------------------------------------
-FORM = 3
+FORM_SETTING = 2
 DEGREE = 1
 NEGATIVE_DEGREE = - DEGREE
 
@@ -26,10 +28,7 @@ STARTING_LEARNING_RATE = 0.0001 # = 0.0001
 LEARNING_RATE_DAMPENING_RATE = 0.9 # = 0.9
 EPOCHS_PER_LOOP = 20000 # = 20000
 NUMBER_OF_LOOPS = 10 # = 10
-
-STARTING_ERROR_COMPARISON = float('inf')
 ROUND_TO = 2 # = 2
-
 #-----------------------------------------------------
 
 if USE_CSV:
@@ -43,45 +42,54 @@ else:
     dep_list = np.array([custom_function(x) for x in indep_list])
 
 # Generate power terms based on FORM
-if FORM == 1 or FORM == 3:
+if FORM_SETTING == 0 or FORM_SETTING == 2:
     powers = np.arange(DEGREE + 1)  # 0 to DEGREE
     x_powers = np.power.outer(indep_list, powers)  # Shape: (len(indep_list), DEGREE + 1)
-elif FORM == 2:
+elif FORM_SETTING == 1:
     powers = np.concatenate((-np.arange(NEGATIVE_DEGREE, 0)[::-1], np.arange(DEGREE + 1)))
     x_powers = np.power.outer(indep_list, powers)  # Shape: (len(indep_list), NEGATIVE_DEGREE + DEGREE + 1)
 else:
-    raise ValueError("Unsupported FORM value.")
+    raise ValueError("Unsupported FORM_SETTING value.")
 
 def run_epoch(A_constants, B_constants=None):
     A_sum = x_powers @ A_constants
-    if FORM == 3:
+    if FORM_SETTING == 2:
         B_sum = x_powers @ B_constants
         current_output = A_sum / B_sum
-    else:
-        B_sum = 1
-        current_output = A_sum
-    #print("sums", A_sum, B_sum, current_output)
+
+        error = current_output - dep_list
+        total_error = np.sum(error ** 2)
+        #print("errors", error, total_error)
+
+        common_term = 2 * error / B_sum
+        An_deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
+        Bn_deltas = np.sum((common_term * A_sum / B_sum)[:, None] * x_powers, axis=0)
+        # print("deltas", An_deltas, Bn_deltas)
+
+        return total_error, An_deltas, Bn_deltas
+
+    current_output = A_sum
+    #print("sums", A_sum, current_output)
 
     error = current_output - dep_list
     total_error = np.sum(error ** 2)
     #print("errors", error, total_error)
 
-    common_term = 2 * error / B_sum
+    common_term = 2 * error
     An_deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
-    if FORM == 3:
-        Bn_deltas = np.sum((common_term * A_sum / B_sum)[:, None] * x_powers, axis=0)
-    else:
-        Bn_deltas = None
-    # print("deltas", An_deltas, Bn_deltas)
+    # print("deltas", An_deltas)
 
-    return total_error, An_deltas, Bn_deltas
+    return total_error, An_deltas, None
 
 
-record = {"error": STARTING_ERROR_COMPARISON}
+record = {
+    "function form": function_forms[FORM_SETTING],
+    "error": float('inf')
+}
 for i in range(NUMBER_OF_LOOPS):
     # print(f"loop {i+1}:")
     A_constants = np.random.random(len(powers))
-    if FORM == 3:
+    if FORM_SETTING == 2:
         B_constants = np.random.random(len(powers))
     else:
         B_constants = None
@@ -94,7 +102,7 @@ for i in range(NUMBER_OF_LOOPS):
     results = run_epoch(A_constants, B_constants)
     last_total_error = results[0]
     A_constants += learning_rate * results[1]
-    if FORM == 3:
+    if FORM_SETTING == 2:
         B_constants += learning_rate * results[2]
     # print("new constants", A_constants, B_constants)
 
@@ -108,7 +116,7 @@ for i in range(NUMBER_OF_LOOPS):
             last_total_error = results[0]
             best_A_constants = A_constants.copy()
             A_constants += learning_rate * results[1]
-            if FORM == 3:
+            if FORM_SETTING == 2:
                 best_B_constants = B_constants.copy()
                 B_constants += learning_rate * results[2]
             # print("new constants", A_constants, B_constants)
@@ -118,7 +126,7 @@ for i in range(NUMBER_OF_LOOPS):
                 break
 
             A_constants = best_A_constants.copy()
-            if FORM == 3:
+            if FORM_SETTING == 2:
                 B_constants = best_B_constants.copy()
             # print("corrected constants", A_constants, B_constants)
 
@@ -138,7 +146,7 @@ best_B_constants = record["Bn"]
 rounded_A_constants = np.round(best_A_constants, ROUND_TO)
 
 
-if FORM == 3:
+if FORM_SETTING == 2:
     rounded_B_constants = np.round(best_B_constants, ROUND_TO)
 
     # Combine both arrays to find the smallest non-zero value
@@ -177,7 +185,7 @@ def estimated_rational_function(x):
     return np.sum(scaled_A_constants * x**powers) / np.sum(scaled_B_constants * x**powers)
 
 x_values = np.linspace(min(indep_list), max(indep_list), 500)
-if FORM == 3:
+if FORM_SETTING == 2:
     y_values1 = np.array([rational_function(x) for x in x_values])
     y_values2 = np.array([estimated_rational_function(x) for x in x_values])
 else:
