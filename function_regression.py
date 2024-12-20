@@ -14,7 +14,7 @@ FORM_SETTING = 2 # = 0, 1 or 2
 DEGREE = 1
 NEGATIVE_DEGREE = - DEGREE
 
-USE_CSV = True
+USE_CSV = False
 CSV_FILE_LOCATION = "points.csv"
 # INDEPENDENT_VARIABLE_COUNT = 1
 # DEPENDENT_VARIABLE_COUNT = 1
@@ -42,20 +42,16 @@ else:
     dep_list = np.array([custom_function(x) for x in indep_list])
 
 # Generate power terms based on FORM
-if FORM_SETTING == 0 or FORM_SETTING == 2:
-    powers = np.arange(DEGREE + 1)  # 0 to DEGREE
-    x_powers = np.power.outer(indep_list, powers)  # Shape: (len(indep_list), DEGREE + 1)
-elif FORM_SETTING == 1:
-    powers = np.concatenate((-np.arange(NEGATIVE_DEGREE, 0)[::-1], np.arange(DEGREE + 1)))
-    x_powers = np.power.outer(indep_list, powers)  # Shape: (len(indep_list), NEGATIVE_DEGREE + DEGREE + 1)
+if FORM_SETTING == 1:
+    powers = np.arange(NEGATIVE_DEGREE, DEGREE + 1)
 else:
-    raise ValueError("Unsupported FORM_SETTING value.")
+    powers = np.arange(DEGREE + 1)
+x_powers = np.power.outer(indep_list, powers)
 
 # Create run_epoch function based on FORM
 if FORM_SETTING == 2:
     def run_epoch(constants):
-        A_constants = constants[0, :]  # Row 0: A_constants
-        B_constants = constants[1, :]  # Row 1: B_constants
+        A_constants, B_constants = constants
         A_sum = x_powers @ A_constants
         B_sum = x_powers @ B_constants
         current_output = A_sum / B_sum
@@ -66,26 +62,16 @@ if FORM_SETTING == 2:
         #print("errors", error, total_error)
 
         common_term = 2 * error / B_sum
-        An_deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
-        Bn_deltas = np.sum((common_term * A_sum / B_sum)[:, None] * x_powers, axis=0)
+        An_deltas = -(common_term @ x_powers)
+        Bn_deltas = (common_term * A_sum / B_sum) @ x_powers
         deltas = np.vstack([An_deltas, Bn_deltas])  # Stack deltas into a 2D array
         #print("deltas", deltas)
 
         return total_error, deltas
 else:
     def run_epoch(constants):
-        current_output = x_powers @ constants
-        #print("sums", current_output)
-
-        error = current_output - dep_list
-        total_error = np.sum(error ** 2)
-        #print("errors", error, total_error)
-
-        common_term = 2 * error
-        deltas = -np.sum(common_term[:, None] * x_powers, axis=0)
-        #print("deltas", deltas)
-
-        return total_error, deltas
+        error = x_powers @ constants - dep_list
+        return np.sum(error ** 2), -2 * (error @ x_powers)  # total_error, deltas
 
 # START ----------------------------------------------------------------------------------------------------------------
 record = {
