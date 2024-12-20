@@ -14,20 +14,21 @@ FORM_SETTING = 2 # = 0, 1 or 2
 DEGREE = 1
 NEGATIVE_DEGREE = - DEGREE
 
-USE_CSV = False
+USE_CSV = True
 CSV_FILE_LOCATION = "points.csv"
 # INDEPENDENT_VARIABLE_COUNT = 1
 # DEPENDENT_VARIABLE_COUNT = 1
 
-RANGE_OVER_X = (-10, 10)
-NUM_OF_POINTS = 500
+RANGE_OVER_X = (-10, 10) # = (-10, 10)
+NUM_OF_POINTS = 500 # = 500
 def custom_function(x):
     return (2*x + 1)/3
 
+NUMBER_OF_LOOPS = 15 # = 15
+EPOCHS_PER_LOOP = 20000 # = 20000
 STARTING_LEARNING_RATE = 0.0001 # = 0.0001
 LEARNING_RATE_DAMPENING_RATE = 0.9 # = 0.9
-EPOCHS_PER_LOOP = 20000 # = 20000
-NUMBER_OF_LOOPS = 10 # = 10
+LAMBDA_REGULARIZATION = 0.1 # = 0.1
 ROUND_TO = 2 # = 2
 #-----------------------------------------------------
 
@@ -52,22 +53,21 @@ x_powers = np.power.outer(indep_list, powers)
 if FORM_SETTING == 2:
     def run_epoch(constants):
         A_constants, B_constants = constants
-        A_sum = x_powers @ A_constants
+        diff = B_constants - desired_B
+
         B_sum = x_powers @ B_constants
-        current_output = A_sum / B_sum
-        #print("sums", A_sum, B_sum, current_output)
+        div = x_powers @ A_constants / B_sum
 
-        error = current_output - dep_list
-        total_error = np.sum(error ** 2)
-        #print("errors", error, total_error)
-
+        error = div - dep_list
         common_term = 2 * error / B_sum
         An_deltas = -(common_term @ x_powers)
-        Bn_deltas = (common_term * A_sum / B_sum) @ x_powers
-        deltas = np.vstack([An_deltas, Bn_deltas])  # Stack deltas into a 2D array
-        #print("deltas", deltas)
+        Bn_deltas = (common_term * div) @ x_powers - 2 * LAMBDA_REGULARIZATION * diff
 
-        return total_error, deltas
+        return (
+            np.sum(error ** 2) + LAMBDA_REGULARIZATION * np.sum(diff ** 2),
+            np.vstack([An_deltas, Bn_deltas])
+        )  # total_error, deltas
+
 else:
     def run_epoch(constants):
         error = x_powers @ constants - dep_list
@@ -82,6 +82,7 @@ for i in range(NUMBER_OF_LOOPS):
     #print(f"loop {i+1}:")
     if FORM_SETTING == 2:
         constants = np.random.random((2, len(powers)))  # 2 rows: A_constants and B_constants
+        desired_B = np.array([1] + [0] * (len(powers) - 1))
     else:
         constants = np.random.random(len(powers))  # 1 row: A_constants
     best_constants = constants.copy()
@@ -109,8 +110,6 @@ for i in range(NUMBER_OF_LOOPS):
         else:  # Last update was not good
             constants = best_constants.copy()
             learning_rate *= LEARNING_RATE_DAMPENING_RATE
-            if learning_rate < 1e-12:
-                break
             #print("corrected constants", constants)
 
         #print(f"Epoch {epoch}, Total Error: {total_error}")
