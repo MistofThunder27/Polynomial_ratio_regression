@@ -24,8 +24,8 @@ NUM_OF_POINTS = 500 # = 500
 def custom_function(x):
     return (2*x + 1)/3
 
-NUMBER_OF_LOOPS = 15 # = 15
-EPOCHS_PER_LOOP = 20000 # = 20000
+NUMBER_OF_LOOPS = 5 * (DEGREE + FORM_SETTING) # = 5 * (DEGREE + FORM_SETTING)
+EPOCHS_PER_LOOP = 2 ** (10 + DEGREE + FORM_SETTING) # = 2 ** (10 + DEGREE + FORM_SETTING)
 STARTING_LEARNING_RATE = 0.0001 # = 0.0001
 LEARNING_RATE_DAMPENING_RATE = 0.9 # = 0.9
 LAMBDA_REGULARIZATION = 0.1 # = 0.1
@@ -78,24 +78,21 @@ record = {
     "function form": function_forms[FORM_SETTING],
     "error": float('inf')
 }
-for i in range(NUMBER_OF_LOOPS):
-    #print(f"loop {i+1}:")
+for _ in range(NUMBER_OF_LOOPS):
     if FORM_SETTING == 2:
         constants = np.random.random((2, len(powers)))  # 2 rows: A_constants and B_constants
         desired_B = np.array([1] + [0] * (len(powers) - 1))
     else:
         constants = np.random.random(len(powers))  # 1 row: A_constants
     best_constants = constants.copy()
-    #print("constants", constants)
     learning_rate = STARTING_LEARNING_RATE
 
     # FIRST EPOCH ----------------------------------
     last_total_error, deltas = run_epoch(constants)
     constants += learning_rate * deltas
-    #print("new constants", constants)
 
     # -----------------
-    for epoch in range(EPOCHS_PER_LOOP):
+    for _ in range(EPOCHS_PER_LOOP):
         total_error, deltas = run_epoch(constants)
 
         # Update constants if error decreases
@@ -105,14 +102,10 @@ for i in range(NUMBER_OF_LOOPS):
             if total_error < 1e-12:
                 break
             constants += learning_rate * deltas
-            #print("new constants", constants)
 
         else:  # Last update was not good
             constants = best_constants.copy()
             learning_rate *= LEARNING_RATE_DAMPENING_RATE
-            #print("corrected constants", constants)
-
-        #print(f"Epoch {epoch}, Total Error: {total_error}")
 
     if last_total_error <= record["error"]:
         record.update({
@@ -125,10 +118,8 @@ constants = record["constants"]
 rounded_constants = np.round(constants, ROUND_TO)
 
 if FORM_SETTING == 2:
-    smallest_non_zero = np.min(rounded_constants[np.nonzero(rounded_constants)])
-    # Scale constants so that the smallest non-zero value becomes 1
-    scale_factor = np.absolute(1 / smallest_non_zero)
-    rounded_constants = np.round(rounded_constants * scale_factor, ROUND_TO)
+    smallest_non_zero = np.min(np.absolute(rounded_constants[np.nonzero(rounded_constants)]))
+    rounded_constants = np.round(rounded_constants / smallest_non_zero, ROUND_TO)
 
 record["constants"] = record["constants"].tolist()
 record["constants-rounded"] = rounded_constants.tolist()
@@ -140,10 +131,12 @@ with open('constants.json', 'w') as f:
 # DRAW -----------------------------------------------------------------------------------------------------------------
 if FORM_SETTING == 2:
     def display_function(x):
-        return np.sum(constants[0, :] * x**powers) / np.sum(constants[1, :] * x**powers)
+        A_constants, B_constants = constants
+        return np.sum(A_constants * x**powers) / np.sum(B_constants * x**powers)
 
     def estimated_display_function(x):
-        return np.sum(rounded_constants[0, :] * x ** powers) / np.sum(rounded_constants[1, :] * x ** powers)
+        A_rounded_constants, B_rounded_constants = rounded_constants
+        return np.sum(A_rounded_constants * x ** powers) / np.sum(B_rounded_constants * x ** powers)
 else:
     def display_function(x):
         return np.sum(constants * x ** powers)
@@ -151,7 +144,7 @@ else:
     def estimated_display_function(x):
         return np.sum(rounded_constants * x ** powers)
 
-x_values = np.linspace(min(indep_list), max(indep_list), 500)
+x_values = np.linspace(min(indep_list), max(indep_list), NUM_OF_POINTS)
 y_values1 = np.array([display_function(x) for x in x_values])
 y_values2 = np.array([estimated_display_function(x) for x in x_values])
 
