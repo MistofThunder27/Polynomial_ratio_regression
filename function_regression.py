@@ -24,11 +24,12 @@ NUM_OF_POINTS = 500 # = 500
 def custom_function(x):
     return (2*x + 1)/3
 
-NUMBER_OF_LOOPS = 5 * (DEGREE + FORM_SETTING) # = 5 * (DEGREE + FORM_SETTING)
-EPOCHS_PER_LOOP = 2 ** (10 + DEGREE + FORM_SETTING) # = 2 ** (10 + DEGREE + FORM_SETTING)
-STARTING_LEARNING_RATE = 0.0001 # = 0.0001
+NUMBER_OF_LOOPS = 2 + DEGREE + FORM_SETTING # = 2 + DEGREE + FORM_SETTING
+EPOCHS_PER_LOOP = 15000 * (2 ** (DEGREE + FORM_SETTING)) # = 15000 * (2 ** (DEGREE + FORM_SETTING))
+STARTING_LEARNING_RATE = 0.1 # = 0.1
 LEARNING_RATE_DAMPENING_RATE = 0.9 # = 0.9
-LAMBDA_REGULARIZATION = 0.1 # = 0.1
+MAX_DELTA = 10.0 # = 10.0
+B_LAMBDA_REGULARIZATION = 0.01 # = 0.01
 ROUND_TO = 2 # = 2
 #-----------------------------------------------------
 
@@ -40,7 +41,7 @@ if USE_CSV:
     dep_list = data[:, -1]  # Dependent variable (y)...........................
 else:
     indep_list = np.linspace(RANGE_OVER_X[0], RANGE_OVER_X[-1], NUM_OF_POINTS)
-    dep_list = np.array([custom_function(x) for x in indep_list])
+    dep_list = custom_function(indep_list)
 
 # Generate power terms based on FORM
 if FORM_SETTING == 1:
@@ -54,24 +55,22 @@ if FORM_SETTING == 2:
     def run_epoch(constants):
         A_constants, B_constants = constants
         diff = B_constants - desired_B
-
         B_sum = x_powers @ B_constants
         div = x_powers @ A_constants / B_sum
 
         error = div - dep_list
         common_term = 2 * error / B_sum
         An_deltas = -(common_term @ x_powers)
-        Bn_deltas = (common_term * div) @ x_powers - 2 * LAMBDA_REGULARIZATION * diff
+        Bn_deltas = (common_term * div) @ x_powers - 2 * B_LAMBDA_REGULARIZATION * diff
 
         return (
-            np.sum(error ** 2) + LAMBDA_REGULARIZATION * np.sum(diff ** 2),
-            np.vstack([An_deltas, Bn_deltas])
-        )  # total_error, deltas
-
+            np.sum(error ** 2) + B_LAMBDA_REGULARIZATION * np.sum(diff ** 2),
+            np.clip(np.vstack([An_deltas, Bn_deltas]), -MAX_DELTA, MAX_DELTA)
+        ) # total_error, deltas
 else:
     def run_epoch(constants):
         error = x_powers @ constants - dep_list
-        return np.sum(error ** 2), -2 * (error @ x_powers)  # total_error, deltas
+        return np.sum(error ** 2), np.clip(-2 * (error @ x_powers), -MAX_DELTA, MAX_DELTA) # total_error, deltas
 
 # START ----------------------------------------------------------------------------------------------------------------
 record = {
@@ -96,22 +95,28 @@ for _ in range(NUMBER_OF_LOOPS):
         total_error, deltas = run_epoch(constants)
 
         # Update constants if error decreases
-        if total_error <= last_total_error:
+        if total_error < last_total_error:
             last_total_error = total_error
             best_constants = constants.copy()
             if total_error < 1e-12:
                 break
             constants += learning_rate * deltas
-
+        elif total_error == last_total_error:
+            constants += learning_rate * deltas
         else:  # Last update was not good
             constants = best_constants.copy()
             learning_rate *= LEARNING_RATE_DAMPENING_RATE
+
+        if _ % 1000 == 0:
+            print(f"epoch: {_}, error: {total_error}, learning_rate: {learning_rate}")
 
     if last_total_error <= record["error"]:
         record.update({
             "error": last_total_error,
             "constants": best_constants,
         })
+        if last_total_error <= 1e-12:
+            break
 
 # Process constants: round to n decimal places and scale ---------------------------------------------------------------
 constants = record["constants"]
